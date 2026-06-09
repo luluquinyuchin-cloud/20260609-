@@ -1,11 +1,9 @@
 /* ====================================================================
-  【神廚大亨：隔空抓藥料理王 v16.0 - 手勢黑市商店版】
-  修改重點：
-    1. 結算畫面移除滑鼠與懸浮倒數，改為全手勢驅動。
-    2. 👍 比讚 (Thumbs Up) -> 開啟黑市商店。
-    3. 👌 比 OK (OK Gesture) -> 關閉黑市商店。
-    4. 👈 舉左手 (Left Hand) -> 購買左邊維他命 ($25)。
-    5. 👉 舉右手 (Right Hand) -> 購買右邊沙漏 ($40)。
+   【神廚大亨：隔空抓藥料理王 v17.0 - 全手勢無鼠驅動版】
+   修改重點：
+     1. 首頁 (INTRO) 移除滑鼠點擊，改為比布 🖐️ 蓄能 2 秒解鎖進入報告。
+     2. 簡報 (GUIDE) 安全期過後，維持隔空揮手 🖐️ 自動切換下一頁。
+     3. 結算與黑市商店 (STAGE_CLEAR) 維持 👍比讚開啟 / 👌比OK關閉 / 左右手感應購買。
 ==================================================================== */
 
 let video;
@@ -67,7 +65,7 @@ let prevHandX = 0;
 let isPinching = false; 
 let particles = [];
 
-// 手勢計時與蓄能
+// 手勢計時與蓄能 (多場景通用)
 let gestureTimer = 0;       
 let lastCheckTime = 0;      
 let requiredHoldTime = 2000; 
@@ -135,6 +133,7 @@ function changeGameState(newState) {
   gameState = newState;
   isPaused = false;
   isShopOpen = false;
+  gestureTimer = 0; // 切換狀態時初始化手勢計時器
   stateEnterMillis = millis(); 
   if (newState === "STAGE1") {
     dayStartMillis = millis();
@@ -144,23 +143,15 @@ function changeGameState(newState) {
 }
 
 function mousePressed() {
+  // 滑鼠點擊做為「全螢幕解鎖受限」的安全降級手段
   let fs = fullscreen();
   if (!fs) fullscreen(true);
 
-  if (gameState === "INTRO") {
-    changeGameState("GUIDE");
-  } else if (gameState === "GUIDE") {
-    if (millis() - stateEnterMillis >= guideSafetyDuration) {
-      changeGameState("START");
-    }
-  } else if (gameState === "START") {
-    changeGameState("MODE_SELECT");
-  } else if (gameState === "GAMEOVER") { 
+  if (gameState === "GAMEOVER") { 
     totalMoney = 100; currentDay = 1; satisfaction = 100; baseDayDuration = 120;
     moneyHistory = [100];
     changeGameState("INTRO");
   }
-  
   checkUIInteraction(mouseX, mouseY, true);
 }
 
@@ -175,7 +166,7 @@ function draw() {
   push();
   if (isShopOpen) {
     stroke(255, 105, 180, 150); strokeWeight(12); noFill();
-    rect(0, 0, width, height); // 商店模式下邊框粉色發光
+    rect(0, 0, width, height); 
   }
   if (isPaused) {
     fill(255, 255, 255, 120); rect(0, 0, width, height);
@@ -191,7 +182,7 @@ function draw() {
   let isFist = false; 
   let isThumbsUp = false;
   let isOK = false;
-  let handSide = "RIGHT"; // 預設鏡頭前的左右手判定
+  let handSide = "RIGHT"; 
   
   if (predictions.length > 0) {
     isHandDetected = true;
@@ -212,12 +203,11 @@ function draw() {
     isThumbsUp = checkThumbsUp(currentHandData);
     isOK = checkOKGesture(currentHandData);
 
-    // 根據手掌中心點在畫面的左半邊或右半邊，判定為左手或右手（因為鏡頭鏡像鏡射）
     let palmX = width - (currentHandData.landmarks[0][0] * (width / video.width));
     if (palmX < width / 2) {
-      handSide = "LEFT";  // 畫面左側 (玩家的右手)
+      handSide = "LEFT";  
     } else {
-      handSide = "RIGHT"; // 畫面右側 (玩家的左手)
+      handSide = "RIGHT"; 
     }
     
     drawHandSkeleton(currentHandData, isPinching, isHandOpen, isFist, isThumbsUp, isOK);
@@ -268,7 +258,6 @@ function draw() {
       runStage3(fingerX, fingerY, deltaTime, currentGestureText); 
       break;
     case "STAGE_CLEAR":
-      // 將偵測到的特殊手勢傳入結算畫面
       runStageClearScreen(fingerX, fingerY, isHandDetected, isHandOpen, isThumbsUp, isOK, handSide, deltaTime);
       break;
     case "GAMEOVER":
@@ -301,7 +290,6 @@ function draw() {
 // ==========================================
 function checkThumbsUp(hand) {
   let ann = hand.annotations;
-  // 比讚：大拇指頂點高於大拇指根部，且其他四隻手指收起（靠近掌心）
   let thumbUp = ann.thumb[3][1] < ann.thumb[1][1];
   let palmBase = hand.landmarks[0];
   let closedCount = 0;
@@ -313,7 +301,6 @@ function checkThumbsUp(hand) {
 
 function checkOKGesture(hand) {
   let ann = hand.annotations;
-  // OK：大拇指指尖與食指指尖捏合，但中指、無名指伸直高於根部
   let d = dist(ann.thumb[3][0], ann.thumb[3][1], ann.indexFinger[3][0], ann.indexFinger[3][1]);
   let isPinch = (d < 35);
   let othersOpen = (ann.middleFinger[3][1] < ann.middleFinger[1][1] && ann.ringFinger[3][1] < ann.ringFinger[1][1]);
@@ -334,7 +321,79 @@ function checkIsFist(hand) {
 }
 
 // ==========================================
-// 核心：結算與黑市手勢控制驅動
+// 新增/修改：首頁手勢驅動機制
+// ==========================================
+function runIntroScreen(isOpen, fx, fy, hasHand, dt) {
+  fill(15, 10, 25, 200); rect(0, 0, width, height);
+  textAlign(CENTER, CENTER); stroke(0); strokeWeight(5); fill(255); textSize(28);
+  text("🌸 期末實作報告：隔空抓藥料理王 👩‍🍳", width / 2, height * 0.2); noStroke();
+
+  fill(255, 215, 0); textSize(18);
+  text("【進入簡報】請舉起手掌比出「布 🖐️」定格 2 秒解鎖功能", width / 2, height * 0.45);
+
+  // 偵測是否比布（手掌張開）進行蓄能
+  if (hasHand && isOpen) {
+    gestureTimer += dt;
+    if (gestureTimer >= 2000) {
+      gestureTimer = 0;
+      changeGameState("GUIDE"); // 手勢解鎖，進入簡報
+    }
+  } else {
+    gestureTimer = max(0, gestureTimer - dt * 2);
+  }
+
+  // 繪製蓄能條
+  let barW = 340, barH = 14, barX = width / 2 - barW / 2, barY = height * 0.55;
+  fill(255, 255, 255, 30); rect(barX, barY, barW, barH, 7);
+  if (isOpen && hasHand) {
+    fill(255, 215, 0);
+    rect(barX, barY, barW * constrain(gestureTimer / 2000, 0, 1), barH, 7);
+  }
+  
+  fill(180, 170, 200); textSize(13);
+  text(hasHand && isOpen ? `⚡ 正在偵測手勢解鎖中...` : `❌ 未偵測到手 Open 手勢`, width / 2, barY + 35);
+}
+
+function runGuideScreen(fx, fy, hasHand, dt, isGuideLocked) {
+  fill(35, 15, 22, 245); rect(0, 0, width, height);
+  textAlign(CENTER, CENTER); fill(255, 215, 0); textSize(width * 0.035); text("💡 系統操作與設計簡介 💡", width / 2, height * 0.08);
+  let boxW = min(width * 0.82, 850), boxH = height * 0.62, boxX = width / 2 - boxW / 2, boxY = height * 0.16;
+  fill(55, 25, 35, 200); stroke(255, 100, 140, 80); strokeWeight(1); rect(boxX, boxY, boxW, boxH, 12);
+  textSize(15); textAlign(LEFT, TOP); fill(255, 210, 220); text("本動態互動系統支援雙模式，經營模式升級為全天總時間制與微型創業經濟：", boxX + 40, boxY + 25);
+  drawGuideCard(boxX + 40, boxY + 70, boxW - 80, 65, "🧅 跨關卡一日總限時 (初始 120 秒)", "時間改為整天共用！必須在時間內依序突破 切菜 ➔ 擺盤 ➔ 烘焙 三大關卡。");
+  drawGuideCard(boxX + 40, boxY + 150, boxW - 80, 65, "💰 手勢全自動化黑市內政體系", "結算畫面比 👍 開商店、👌 關商店、左右邊高舉單手直接隔空購物！不需滑鼠觸觸碰。");
+  drawGuideCard(boxX + 40, boxY + 230, boxW - 80, 65, "📈 關卡間自動倒數 ➔ 每日結束手動手勢", "關卡間轉換只要3秒自動通過！只有一天全部過完的大總結，才需要比手勢3秒並看報表。");
+  
+  textAlign(CENTER, CENTER);
+  if (isGuideLocked) {
+    fill(255, 100, 100); textSize(16); text(`🛑 報告安全防鎖定中... 請放心講解 (${Math.ceil((guideSafetyDuration - (millis() - stateEnterMillis)) / 1000)}秒後解鎖)`, width / 2, height - 70);
+  } else {
+    fill(100, 255, 150); textSize(16); text("✅ 簡報已解鎖！請大範圍快速揮動手掌 🖐️ 即可進入下一頁！", width / 2, height - 70);
+    // 揮手切頁面判定
+    if (hasHand && (abs(fx - prevHandX) > 25 || abs(fy - prevHandY) > 25)) {
+      changeGameState("START");
+    }
+  }
+}
+
+function drawGuideCard(x, y, w, h, title, desc) {
+  push(); fill(255, 255, 255, 15); noStroke(); rect(x, y, w, h, 6);
+  fill(255, 130, 160); textSize(15); text(title, x + 15, y + 12);
+  fill(240, 220, 225); textSize(13); text(desc, x + 15, y + 36); pop();
+}
+
+function runStartScreen(isOpen, dt) {
+  fill(30, 10, 20, 220); rect(0, 0, width, height);
+  textAlign(CENTER, CENTER); fill(255); textSize(width * 0.04); text("🌸 隔空抓藥料理王 🌸", width / 2, height / 2 - 80);
+  textSize(18); fill(255, 215, 0); text("【最後準備】請比出「布 🖐️」定格 2 秒，前往模式選擇中心！", width / 2, height / 2 - 10);
+  if (isOpen) { gestureTimer += dt; if (gestureTimer >= 2000) { gestureTimer = 0; changeGameState("MODE_SELECT"); } }
+  else { gestureTimer = max(0, gestureTimer - dt * 2); }
+  fill(255, 255, 255, 30); rect(width / 2 - 150, height / 2 + 40, 300, 10, 6);
+  if (isOpen) { fill(255, 215, 0); rect(width / 2 - 150, height / 2 + 40, 300 * constrain(gestureTimer / 2000, 0, 1), 10, 6); }
+}
+
+// ==========================================
+// 結算與黑市手勢控制驅動
 // ==========================================
 function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, handSide, dt) {
   fill(20, 12, 28, 240); rect(0, 0, width, height);
@@ -354,7 +413,6 @@ function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, hand
     textAlign(LEFT, CENTER); fill(100, 255, 150); textSize(18); text(`💰 目前總資產: $${totalMoney} 元`, boxX + 60, statsY * 1.005);
     textAlign(RIGHT, CENTER); fill(255, 130, 160); text(`⭐ 顧客滿意度: ${satisfaction} 分`, boxX + boxW - 60, statsY * 1.005);
     
-    // 繪製歷史折線圖
     if (moneyHistory.length >= 2) {
       let graphX = boxX + 80, graphY = boxY + 190, graphW = boxW - 160, graphH = boxH - 260;
       stroke(255, 255, 255, 30); strokeWeight(1); noFill(); rect(graphX, graphY, graphW, graphH);
@@ -379,27 +437,24 @@ function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, hand
     textAlign(CENTER, CENTER); fill(180, 170, 200); textSize(18); text("⏱️ 備料程序正常，系統正在自動對接下個工作台...", width / 2, boxY + 200);
   }
 
-  // --- 手勢商店核心驅動排程 ---
+  // 手勢商店核心驅動排程
   if (gameMode === "TYCOON" && isActualDayEnd) {
     if (!isShopOpen) {
-      // 1. 未開商店時：比讚 👍 即可開啟
       if (hasHand && isThumbsUp && shopCooldownTimer <= 0) {
         isShopOpen = true;
-        shopCooldownTimer = 800; // 設置防連擊冷卻
+        shopCooldownTimer = 800; 
         spawnParticles(width/2, height/2, color(255, 215, 0));
       }
     } else {
-      // 2. 已開商店時：比 OK 👌 關閉
       if (hasHand && isOK && shopCooldownTimer <= 0) {
         isShopOpen = false;
         shopCooldownTimer = 800;
       }
-      // 3. 已開商店時：舉左/右手購買物品
       if (hasHand && shopCooldownTimer <= 0 && !isOK && !isThumbsUp) {
-        if (handSide === "LEFT") { // 畫面左側(玩家右手) -> 買維他命
+        if (handSide === "LEFT") { 
           buyItem("VITAMIN");
           shopCooldownTimer = 1000; 
-        } else if (handSide === "RIGHT") { // 畫面右側(玩家左手) -> 買沙漏
+        } else if (handSide === "RIGHT") { 
           buyItem("HOURGLASS");
           shopCooldownTimer = 1000;
         }
@@ -409,7 +464,6 @@ function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, hand
 
   textAlign(CENTER, CENTER);
 
-  // 跨日蓄能倒數提示
   if (!isShopOpen) {
     let requiredTime = 3000; 
     if (isActualDayEnd) {
@@ -428,7 +482,6 @@ function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, hand
         text("👍 比個讚開啟黑市商店 | 🖐️ 舉起手掌(比布) 3 秒直接跨入下一天", width / 2, height - 85);
       }
     } else {
-      // 自動轉換關卡
       transitionGestureTimer += dt;
       let countdown = max(0, (requiredTime - transitionGestureTimer) / 1000).toFixed(1);
       fill(255); textSize(16); text(`⏱️ 正在自動前往下一關... 剩餘 ${countdown} 秒`, width / 2, height - 85);
@@ -442,15 +495,11 @@ function runStageClearScreen(fx, fy, hasHand, isHandOpen, isThumbsUp, isOK, hand
     }
   }
 
-  // 渲染商店覆蓋層
   if (isShopOpen) { 
     drawShopOverlay(fx, fy, hasHand, handSide); 
   }
 }
 
-// ==========================================
-// UI 渲染：純手勢黑市商店
-// ==========================================
 function drawShopOverlay(fx, fy, hasHand, handSide) {
   push();
   let shW = 620, shH = 420, shX = width/2 - shW/2, shY = height/2 - shH/2;
@@ -465,12 +514,11 @@ function drawShopOverlay(fx, fy, hasHand, handSide) {
   for (let i = 0; i < keys.length; i++) {
     let key = keys[i];
     let item = shopInventory[key];
-    let col = i % 2; // 0 或 1
+    let col = i % 2; 
     let row = floor(i / 2);
     let ix = shX + 40 + col * 290;
     let iy = shY + 90 + row * 135;
 
-    // 判定該商品對應的手感應區 (左排用左手, 右排用右手)
     let isDetected = hasHand && ((col === 0 && handSide === "LEFT") || (col === 1 && handSide === "RIGHT"));
     
     if (item.bought) fill(60, 60, 70, 150);
@@ -487,14 +535,12 @@ function drawShopOverlay(fx, fy, hasHand, handSide) {
     fill(100, 255, 150); textSize(16); 
     text(item.bought ? "SOLD OUT" : `$ ${item.price}`, ix + 125, iy + 85);
 
-    // 購買觸發
     if (!item.bought && isDetected && shopCooldownTimer <= 0) {
       buyItem(key);
       shopCooldownTimer = 1000;
     }
   }
 
-  // 底部控制操作提示
   fill(255, 100, 150); textSize(15);
   text("👌 比出「OK」手勢 ➔ 關閉並離開商店", width/2, shY + shH - 65);
   
@@ -506,144 +552,6 @@ function drawShopOverlay(fx, fy, hasHand, handSide) {
   pop();
 }
 
-function buyItem(key) {
-  let item = shopInventory[key];
-  if (totalMoney >= item.price) {
-    totalMoney -= item.price;
-    item.bought = true;
-    myItems.push(item.name);
-    
-    if (key === "VITAMIN") satisfaction = min(100, satisfaction + 15);
-    if (key === "HOURGLASS") baseDayDuration += 10;
-    
-    spawnParticles(width/2, height/2, color(255, 215, 0));
-  }
-}
-
-// ==========================================
-// 骨架繪製與特殊手勢狀態變色
-// ==========================================
-function drawHandSkeleton(hand, pinching, isOpen, isFist, isThumbsUp, isOK) {
-  push();
-  let landmarks = hand.landmarks; let annotations = hand.annotations; strokeWeight(4);
-  
-  if (isThumbsUp) stroke(255, 215, 0, 240);       // 比讚顯示黃金光
-  else if (isOK) stroke(0, 191, 255, 240);         // 比 OK 顯示深天藍光
-  else if (isFist) stroke(0, 255, 100, 230); 
-  else if (isOpen) stroke(255, 255, 255, 200); 
-  else if (pinching) stroke(255, 60, 120, 230); 
-  else stroke(255, 130, 170, 190); 
-  noFill();
-  
-  for (let finger of ['thumb', 'indexFinger', 'middleFinger', 'ringFinger', 'pinky']) {
-    beginShape();
-    let fingerPoints = annotations[finger]; 
-    for (let i = 0; i < fingerPoints.length; i++) { 
-      let pt = fingerPoints[i]; 
-      vertex(width - (pt[0] * (width / video.width)), pt[1] * (height / video.height)); 
-    }
-    endShape();
-  }
-  
-  noStroke();
-  for (let pt of landmarks) {
-    let x = width - (pt[0] * (width / video.width)), y = pt[1] * (height / video.height);
-    if (isThumbsUp) fill(255, 215, 0);
-    else if (isOK) fill(0, 191, 255);
-    else if (isFist) fill(0, 255, 100);
-    else if (isOpen) fill(255);
-    else if (pinching) fill(255, 50, 100);
-    else fill(255, 160, 190);
-    ellipse(x, y, 9, 9);
-  }
-  pop();
-}
-
-function handleDayTimeout() {
-  totalMoney = max(0, totalMoney - 30); 
-  moneyHistory.push(totalMoney); 
-  resetShop(); // 每日結算重置商店
-  currentDay++;
-  startTransition("STAGE1", "❌ 糟糕！營業時間耗盡", "今天沒能來得及出爐披薩！\n強制扣除店面耗損 -$30\n👍 比讚開黑市，或 🖐️ 比布 3 秒前進...", true);
-}
-
-function resetShop() {
-  for (let k in shopInventory) shopInventory[k].bought = false;
-  myItems = [];
-}
-
-function drawInventory() {
-  if (myItems.length === 0 || gameState === "INTRO" || gameState === "GUIDE") return;
-  push();
-  fill(0, 150); noStroke();
-  rect(width - 180, height - 130, 160, 110, 10);
-  fill(255, 215, 0); textSize(14); textAlign(LEFT, TOP);
-  text("🎒 持有道具:", width - 165, height - 115);
-  fill(255, 200); textSize(12);
-  for (let i = 0; i < myItems.length; i++) {
-    text("● " + myItems[i], width - 165, height - 90 + i * 18);
-  }
-  pop();
-}
-
-function checkUIInteraction(hx, hy, isMouseClick, dt = 0) {
-  // 為了防止衝突，非結算畫面的滑鼠點擊維持原本的基礎換頁邏輯
-  if (gameState.startsWith("STAGE") && !isPaused) {
-    let btnX = 20, btnY = height - 70, btnW = 60, btnH = 50;
-    if (hx > btnX && hx < btnX + btnW && hy > btnY && hy < btnY + btnH && isMouseClick) {
-      isPaused = true; pauseStartMillis = millis();
-    }
-  }
-  if (isPaused && isMouseClick) {
-    let boxX = width / 2 - 150;
-    if (hx > boxX && hx < boxX + 300 && hy > height/2 - 30 && hy < height/2 + 20) { isPaused = false; dayStartMillis += (millis() - pauseStartMillis); }
-    if (hx > boxX && hx < boxX + 300 && hy > height/2 + 40 && hy < height/2 + 90) { isPaused = false; changeGameState("INTRO"); }
-  }
-}
-
-// ==========================================
-// 第一關、第二關、第三關、常駐 UI 與粒子特效其餘邏輯完整保留
-// ==========================================
-function runIntroScreen(isOpen, fx, fy, hasHand, dt) {
-  textAlign(CENTER, CENTER); stroke(0); strokeWeight(5); fill(255); textSize(28);
-  text("🌸 期末實作報告：隔空抓藥料理王 👩‍🍳", width / 2, height * 0.15); noStroke();
-
-  let btnW = 320, btnH = 80, btnX = width / 2 - btnW / 2, btnY = height * 0.5;
-  fill(45, 15, 25, 230); stroke(255, 215, 0, 200); strokeWeight(2); rect(btnX, btnY, btnW, btnH, 15);
-  stroke(0); strokeWeight(2); fill(255); textSize(20); text("🌟 點擊滑鼠進入報告並解鎖全螢幕 🌟", width / 2, btnY + btnH / 2); noStroke();
-}
-
-function runGuideScreen(fx, fy, hasHand, dt, isGuideLocked) {
-  fill(35, 15, 22, 245); rect(0, 0, width, height);
-  textAlign(CENTER, CENTER); fill(255, 215, 0); textSize(width * 0.035); text("💡 系統操作與設計簡介 💡", width / 2, height * 0.08);
-  let boxW = min(width * 0.82, 850), boxH = height * 0.62, boxX = width / 2 - boxW / 2, boxY = height * 0.16;
-  fill(55, 25, 35, 200); stroke(255, 100, 140, 80); strokeWeight(1); rect(boxX, boxY, boxW, boxH, 12);
-  textSize(15); textAlign(LEFT, TOP); fill(255, 210, 220); text("本動態互動系統支援雙模式，經營模式升級為全天總時間制與微型創業經濟：", boxX + 40, boxY + 25);
-  drawGuideCard(boxX + 40, boxY + 70, boxW - 80, 65, "🧅 跨關卡一日總限時 (初始 120 秒)", "時間改為整天共用！必須在時間內依序突破 切菜 ➔ 擺盤 ➔ 烘焙 三大關卡。");
-  drawGuideCard(boxX + 40, boxY + 150, boxW - 80, 65, "💰 手勢全自動化黑市內政體系", "結算畫面比 👍 開商店、👌 關商店、左右邊高舉單手直接隔空購物！不需滑鼠觸觸碰。");
-  drawGuideCard(boxX + 40, boxY + 230, boxW - 80, 65, "📈 關卡間自動倒數 ➔ 每日結束手動手勢", "關卡間轉換只要3秒自動通過！只有一天全部過完的大總結，才需要比手勢3秒並看報表。");
-  textAlign(CENTER, CENTER);
-  if (isGuideLocked) {
-    fill(255, 100, 100); textSize(18); text(`🛑 報告安全防鎖定中... 請放心講解 (${Math.ceil((guideSafetyDuration - (millis() - stateEnterMillis)) / 1000)}秒後解鎖)`, width / 2, height - 70);
-  } else {
-    fill(100, 255, 150); textSize(18); text("✅ 簡報已解鎖！大範圍快速揮手 🖐️ 或【直接點擊滑鼠】即可進入下一頁！", width / 2, height - 70);
-    if (hasHand && (abs(fx - prevHandX) > 25 || abs(fy - prevHandY) > 25)) changeGameState("START");
-  }
-}
-function drawGuideCard(x, y, w, h, title, desc) {
-  push(); fill(255, 255, 255, 15); noStroke(); rect(x, y, w, h, 6);
-  fill(255, 130, 160); textSize(15); text(title, x + 15, y + 12);
-  fill(240, 220, 225); textSize(13); text(desc, x + 15, y + 36); pop();
-}
-function runStartScreen(isOpen, dt) {
-  fill(30, 10, 20, 220); rect(0, 0, width, height);
-  textAlign(CENTER, CENTER); fill(255); textSize(width * 0.04); text("🌸 隔空抓藥料理王 🌸", width / 2, height / 2 - 80);
-  textSize(18); fill(255, 215, 0); text("【最後準備】請比出「布 🖐️」定格 2 秒，前往模式選擇中心！", width / 2, height / 2 - 10);
-  if (isOpen) { gestureTimer += dt; if (gestureTimer >= 2000) { gestureTimer = 0; changeGameState("MODE_SELECT"); } }
-  else { gestureTimer = max(0, gestureTimer - dt * 2); }
-  fill(255, 255, 255, 30); rect(width / 2 - 150, height / 2 + 40, 300, 10, 6);
-  if (isOpen) { fill(255, 215, 0); rect(width / 2 - 150, height / 2 + 40, 300 * constrain(gestureTimer / 2000, 0, 1), 10, 6); }
-}
 function runModeSelectScreen(fx, fy, hasHand, dt, isPageLocked) {
   fill(20, 10, 25, 240); rect(0, 0, width, height);
   textAlign(CENTER, CENTER); fill(255, 215, 0); textSize(35); text("🍳 選擇你的神廚模式 🍳", width / 2, height * 0.15);
@@ -663,15 +571,17 @@ function runModeSelectScreen(fx, fy, hasHand, dt, isPageLocked) {
     } else { gestureTimer = 0; }
   }
 }
+
 function drawModeButton(x, y, w, h, title, desc, col, isHover) {
   push(); if (isHover) { translate(0, -6); stroke(255, 215, 0); strokeWeight(5); fill(red(col) + 30, green(col) + 30, blue(col) + 30, 240); } else { noStroke(); fill(red(col), green(col), blue(col), 180); }
   rect(x, y, w, h, 20); fill(255); textAlign(CENTER, TOP); textSize(26); text(title, x + w / 2, y + 35);
   fill(235); textSize(14); textAlign(CENTER, TOP); text(desc, x + w / 2, y + 100); pop();
 }
-function runStage1(fx, fy, isFist, dt) {
+
+function runStage1(fx, fy, isFist, dt, gestureStatus) {
   let titleHeader = (gameMode === "TYCOON") ? `【第 ${currentDay} 天 營運中】` : "【體驗模式】";
   let timerStr = (gameMode === "TYCOON") ? "今日剩餘: " + Math.ceil(dayTimer) + " 秒" : "已耗時: " + floor((millis() - dayStartMillis) / 1000) + " 秒";
-  drawUI(titleHeader + "第一關：揮手切菜！(目標 10 個)", timerStr);
+  drawUI(titleHeader + "第一關：揮手切菜！(目標 10 個)", timerStr, gestureStatus);
   if (!isPaused) { foodX += foodSpeedX; foodY += foodSpeedY; foodSpeedY += 0.48; }
   push(); if (foodColor) fill(foodColor); else fill(200); ellipse(foodX, foodY, 80, 80); 
   if (foodType === "BOMB") { stroke(255, 0, 0, 150 + sin(frameCount * 0.2) * 100); strokeWeight(10); ellipse(foodX, foodY, 90, 90); } pop();
@@ -690,6 +600,7 @@ function runStage1(fx, fy, isFist, dt) {
   if (stage1CutCount >= 10 && !isPaused) { if (gameMode === "TYCOON") totalMoney += 30; startTransition("STAGE2", "🎉 第一關備料達標！", (gameMode === "TYCOON" ? "獲得過關獎金 +$30！\n" : "") + "即將前往下一關...", false); }
   drawProgressBar(stage1CutCount, 10, "食材備料數量");
 }
+
 function resetFood() {
   foodX = random(width * 0.2, width * 0.8); foodY = height + 50; foodSpeedX = random(-3, 3); foodSpeedY = random(-19, -23);
   let r = random(100);
@@ -698,8 +609,10 @@ function resetFood() {
   else if (r < 85) { foodType = "PINEAPPLE"; foodLabel = "🍍\n鳳梨"; foodColor = color(255, 210, 50); } 
   else { foodType = "BOMB"; foodLabel = "💣\n壞馬鈴薯"; foodColor = color(70, 70, 80); }
 }
+
 function initStage2() { stage2PizzaCount = 0; targetBoxX = width / 2; targetBoxY = height - 160; hasItem = false; isWaitingForDrop = false; updateCheesePosition(); }
 function updateCheesePosition() { cheeseSpawnX = (random(100) < 50) ? width * 0.2 : width * 0.8; }
+
 function runStage2(fx, fy, hasHand, dt, gestureStatus) {
   let titleHeader = (gameMode === "TYCOON") ? `【第 ${currentDay} 天 營運中】` : "【體驗模式】";
   let timerStr = (gameMode === "TYCOON") ? "今日剩餘: " + Math.ceil(dayTimer) + " 秒" : "已耗時: " + floor((millis() - dayStartMillis) / 1000) + " 秒";
@@ -730,11 +643,13 @@ function runStage2(fx, fy, hasHand, dt, gestureStatus) {
   }
   if (stage2PizzaCount >= 2 && !isPaused) { if (gameMode === "TYCOON") totalMoney += 40; startTransition("STAGE3", "🌟 第二關達標！起司放滿", (gameMode === "TYCOON" ? "獲得過關獎金 +$40！\n" : "") + "即將前往下一關...", false); }
 }
+
 function initStage3() { ovenStarted = false; ovenButtons = []; }
 function spawnOvenButtons() {
   ovenButtons = []; let labels = ["🌡️ 溫度設定", "⏱️ 定時旋鈕", "🌀 旋風風速"]; let colors = [color(255, 120, 50), color(255, 200, 50), color(50, 180, 255)];
   for (let i = 0; i < ovenTargetCount; i++) { ovenButtons.push({ x: random(width * 0.15, width * 0.85), y: random(height * 0.25, height * 0.75), size: 90, label: labels[i], col: colors[i], active: true }); }
 }
+
 function runStage3(fx, fy, dt, gestureStatus) {
   let titleHeader = (gameMode === "TYCOON") ? `【第 ${currentDay} 天 營運中】` : "【體驗模式】";
   let timerStr = (gameMode === "TYCOON") ? "今日剩餘: " + Math.ceil(dayTimer) + " 秒" : "已耗時: " + floor((millis() - dayStartMillis) / 1000) + " 秒";
@@ -764,66 +679,130 @@ function runStage3(fx, fy, dt, gestureStatus) {
     }
   }
 }
+
 function drawGameOverScreen() {
   fill(20, 10, 30, 250); rect(0, 0, width, height);
-  textAlign(CENTER, CENTER); fill(255, 215, 0); textSize(40); text(gameMode === "EXPERIENCE" ? "⏱️ 體驗模式 通關成績單" : "💸 🚨 遺憾！神廚破產公告 🚨 💸", width / 2, height * 0.15);
-  let boxW = 600, boxH = 350; fill(40, 20, 50, 200); stroke(255, 215, 0); rect(width / 2 - boxW / 2, height / 2 - 100, boxW, boxH, 20); noStroke();
-  fill(255); textAlign(LEFT, CENTER); textSize(24);
-  if (gameMode === "EXPERIENCE") { text(`🏆 第三關烘焙耗時: ${totalUsedSeconds} 秒`, width / 2 - 200, height / 2); } 
-  else { text(`📈 最終營運天數: 第 ${currentDay - 1} 天`, width / 2 - 200, height / 2 - 50); text(`💰 破產時資產: $ ${totalMoney} 元`, width / 2 - 200, height / 2); text(`⭐ 最終顧客滿意度: ${satisfaction} 分`, width / 2 - 200, height / 2 + 50); }
-  fill(255, 100, 140); rect(width/2 - 100, height - 100, 200, 50, 10); fill(255); textAlign(CENTER, CENTER); text("重新回到首頁", width / 2, height - 75);
+  textAlign(CENTER, CENTER); fill(255, 50, 50); textSize(40); text("GAME OVER 結束營業", width/2, height/2 - 40);
+  fill(230); textSize(18); text((gameMode === "TYCOON") ? `最終存活天數: 第 ${currentDay} 天` : `總共花費時間: ${totalUsedSeconds} 秒`, width/2, height/2 + 20);
+  fill(150, 150, 170); textSize(14); text("- 點擊滑鼠任意處返回主選單首頁 -", width/2, height/2 + 80);
 }
-function drawUI(title, timerStr, gestureStatus = "") {
-  // 畫頂部狀態列
-  fill(35, 15, 25, 200); 
-  rect(0, 0, width, 85);
-  
-  // 顯示標題與資產
-  textAlign(LEFT, CENTER); fill(255); textSize(16);
-  let fullTitle = "👩‍🍳 " + title + (gameMode === "TYCOON" ? ` | 💰 資產: $${totalMoney}` : "");
-  text(fullTitle, 30, 30);
-  
-  // 顯示手勢提示框 (新增)
-  if (gestureStatus !== "") {
-    fill(255, 215, 0, 40); stroke(255, 215, 0); strokeWeight(1);
-    rect(30, 48, 220, 26, 5); noStroke();
-    fill(255, 215, 0); textSize(13);
-    text(gestureStatus, 40, 61);
-  }
 
-  // 顯示右上角固定 HUD
-  textAlign(RIGHT, CENTER); textSize(18); fill(255, 100, 140);
-  text(timerStr, width - 30, 30);
-  
-  // 懸浮圖示 HUD (常駐提示)
+function startTransition(nxtState, tTitle, tDesc, isDayEnd) {
+  nextState = nxtState; transitionTitle = tTitle; transitionDesc = tDesc; isActualDayEnd = isDayEnd; transitionGestureTimer = 0; changeGameState("STAGE_CLEAR");
+}
+
+function buyItem(key) {
+  let item = shopInventory[key];
+  if (totalMoney >= item.price) {
+    totalMoney -= item.price;
+    item.bought = true;
+    myItems.push(item.name);
+    if (key === "VITAMIN") satisfaction = min(100, satisfaction + 15);
+    if (key === "HOURGLASS") baseDayDuration += 10;
+    spawnParticles(width/2, height/2, color(255, 215, 0));
+  }
+}
+
+function drawHandSkeleton(hand, pinching, isOpen, isFist, isThumbsUp, isOK) {
   push();
-  fill(255, 255, 255, 50); 
-  ellipse(width - 40, 58, 36, 36); // 商店圖示
-  fill(255); textAlign(CENTER, CENTER); textSize(16); text("🛒", width - 40, 58);
-  
-  fill(255, 255, 255, 50); 
-  ellipse(width - 85, 58, 36, 36); // 暫停圖示
-  fill(255); text("⏸", width - 85, 58);
+  let landmarks = hand.landmarks; let annotations = hand.annotations; strokeWeight(4);
+  if (isThumbsUp) stroke(255, 215, 0, 240); 
+  else if (isOK) stroke(0, 191, 255, 240); 
+  else if (isFist) stroke(0, 255, 100, 230); 
+  else if (isOpen) stroke(255, 255, 255, 200); 
+  else if (pinching) stroke(255, 60, 120, 230); 
+  else stroke(255, 130, 170, 190); 
+  noFill();
+  for (let finger of ['thumb', 'indexFinger', 'middleFinger', 'ringFinger', 'pinky']) {
+    beginShape();
+    let fingerPoints = annotations[finger]; 
+    for (let i = 0; i < fingerPoints.length; i++) { 
+      let pt = fingerPoints[i]; 
+      vertex(width - (pt[0] * (width / video.width)), pt[1] * (height / video.height)); 
+    }
+    endShape();
+  }
+  noStroke();
+  for (let pt of landmarks) {
+    let x = width - (pt[0] * (width / video.width)), y = pt[1] * (height / video.height);
+    if (isThumbsUp) fill(255, 215, 0);
+    else if (isOK) fill(0, 191, 255);
+    else if (isFist) fill(0, 255, 100);
+    else if (isOpen) fill(255);
+    else if (pinching) fill(255, 50, 100);
+    else fill(255, 160, 190);
+    ellipse(x, y, 9, 9);
+  }
   pop();
 }
-function drawProgressBar(current, target, label) {
-  push(); let barW = 300; let barH = 22; let barX = width / 2 - barW / 2; let barY = height - 60;
-  fill(0, 130); rect(barX, barY, barW, barH, 10); fill(255, 215, 0); rect(barX, barY, map(constrain(current, 0, target), 0, target, 0, barW), barH, 10);
-  textAlign(CENTER, CENTER); fill(255); textSize(13); text(label + " : " + current + " / " + target, width / 2, barY + barH / 2); pop();
+
+function handleDayTimeout() {
+  totalMoney = max(0, totalMoney - 30); 
+  moneyHistory.push(totalMoney); 
+  resetShop(); 
+  currentDay++;
+  startTransition("STAGE1", "❌ 糟糕！營業時間耗盡", "今天沒能來得及出爐披薩！\n強制扣除店面耗損 -$30\n👍 比讚開黑市，或 🖐 *比布 3 秒前進...", true);
 }
-function spawnParticles(x, y, col) { for (let i = 0; i < 20; i++) { particles.push({ x: x, y: y, vx: random(-5, 5), vy: random(-5, 5), alpha: 255, r: red(col), g: green(col), b: blue(col) }); } }
+
+function resetShop() {
+  for (let k in shopInventory) shopInventory[k].bought = false;
+  myItems = [];
+}
+
+function drawInventory() {
+  if (myItems.length === 0 || gameState === "INTRO" || gameState === "GUIDE") return;
+  push(); fill(0, 150); noStroke(); rect(width - 180, height - 130, 160, 110, 10);
+  fill(255, 215, 0); textSize(14); textAlign(LEFT, TOP); text("🎒 持有道具:", width - 165, height - 115);
+  fill(255, 200); textSize(12);
+  for (let i = 0; i < myItems.length; i++) { text("● " + myItems[i], width - 165, height - 90 + i * 18); } pop();
+}
+
+function checkUIInteraction(hx, hy, isMouseClick, dt = 0) {
+  if (gameState.startsWith("STAGE") && !isPaused) {
+    let btnX = 20, btnY = height - 70, btnW = 60, btnH = 50;
+    if (hx > btnX && hx < btnX + btnW && hy > btnY && hy < btnY + btnH && isMouseClick) { isPaused = true; pauseStartMillis = millis(); }
+  }
+  if (isPaused && isMouseClick) {
+    let boxX = width / 2 - 150;
+    if (hx > boxX && hx < boxX + 300 && hy > height/2 - 30 && hy < height/2 + 20) { isPaused = false; dayStartMillis += (millis() - pauseStartMillis); }
+    if (hx > boxX && hx < boxX + 300 && hy > height/2 + 40 && hy < height/2 + 90) { isPaused = false; changeGameState("INTRO"); }
+  }
+}
+
+function drawUI(title, rightText, gestureStatus = "") {
+  push(); fill(0, 90); noStroke(); rect(0, 0, width, 60); fill(255); textSize(18); textAlign(LEFT, CENTER); text(title, 25, 30);
+  textAlign(RIGHT, CENTER); fill(255, 230, 100); text(rightText, width - 25, 30);
+  if (gestureStatus !== "") { fill(255, 100, 150); textSize(14); textAlign(CENTER, CENTER); text(gestureStatus, width / 2, 30); }
+  let pauseX = 20, pauseY = height - 70, pauseW = 60, pauseH = 50; fill(40, 180); stroke(180); rect(pauseX, pauseY, pauseW, pauseH, 6);
+  fill(255); noStroke(); textSize(14); textAlign(CENTER, CENTER); text("⏸\n暫停", pauseX + pauseW/2, pauseY + pauseH/2); pop();
+}
+
+function drawProgressBar(current, target, label) {
+  push(); let w = 300, h = 18, x = width/2 - w/2, y = height - 45; fill(0, 120); noStroke(); rect(x - 10, y - 25, w + 20, h + 32, 8);
+  fill(230); textSize(12); textAlign(CENTER, BOTTOM); text(`${label}: ${current} / ${target}`, width/2, y - 4);
+  fill(50, 40, 60); rect(x, y, w, h, 4); fill(100, 255, 180); rect(x, y, map(constrain(current, 0, target), 0, target, 0, w), h, 4); pop();
+}
+
+function drawPauseOverlay(fx, fy, hasHand) {
+  push(); fill(20, 15, 30, 220); rect(0, 0, width, height); textAlign(CENTER, CENTER); fill(255, 215, 0); textSize(36); text("PAUSED 遊戲暫停", width/2, height/2 - 90);
+  let boxX = width / 2 - 150; drawPauseButton(boxX, height/2 - 30, "▶  繼續營業", color(50, 180, 100), (hasHand && fx > boxX && fx < boxX + 300 && fy > height/2 - 30 && fy < height/2 + 20));
+  drawPauseButton(boxX, height/2 + 40, "🚪 返回首頁", color(200, 50, 50), (hasHand && fx > boxX && fx < boxX + 300 && fy > height/2 + 40 && fy < height/2 + 90)); pop();
+}
+
+function drawPauseButton(x, y, txt, col, isHover) {
+  push(); if (isHover) { fill(red(col)+40, green(col)+40, blue(col)+40); stroke(255); strokeWeight(2); } else { fill(col); noStroke(); } rect(x, y, 300, 50, 8); fill(255); textSize(18); text(txt, x + 150, y + 25); pop();
+}
+
 function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
-    let p = particles[i]; p.x += p.vx; p.y += p.vy; p.alpha -= 6; fill(p.r, p.g, p.b, p.alpha); noStroke(); ellipse(p.x, p.y, 8, 8); if (p.alpha <= 0) particles.splice(i, 1);
+    let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.alpha -= 4;
+    push(); noStroke(); fill(red(p.c), green(p.c), blue(p.c), p.alpha); ellipse(p.x, p.y, p.size, p.size); pop();
+    if (p.alpha <= 0) particles.splice(i, 1);
   }
-}// ==========================================
-// 補充遺漏的函數：負責關卡轉場
-// ==========================================
-function startTransition(next, title, desc, isDayEnd) {
-  gameState = "STAGE_CLEAR";
-  nextState = next;
-  transitionTitle = title;
-  transitionDesc = desc;
-  transitionGestureTimer = 0;
-  isActualDayEnd = isDayEnd;
+}
+
+function spawnParticles(x, y, col) {
+  for (let i = 0; i < 15; i++) {
+    particles.push({ x: x, y: y, vx: random(-4, 4), vy: random(-6, 2), size: random(5, 14), c: col || color(255), alpha: 255 });
+  }
 }
